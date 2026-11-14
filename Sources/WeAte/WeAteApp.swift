@@ -38,8 +38,9 @@ struct WeAte: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(width: 1080, height: 720)
+                .frame(minWidth: 1080, minHeight: 720)
         }
+        .windowStyle(.hiddenTitleBar)
     }
 
     /// Puts the fan back in firmware control on ⌘Q, Ctrl-C (SIGINT) and `kill` (SIGTERM).
@@ -67,6 +68,7 @@ struct WeAte: App {
 struct ContentView: View {
     let manager: OMSManager = .shared
     let smc = SMC.shared
+    let v8 = V8Sound.shared
     
     @State private var fanRPM: Float = 0
     @State private var engine = Engine()
@@ -127,9 +129,41 @@ struct ContentView: View {
     @State private var pressure: Float = 0
     
     var body: some View {
-        Accelerometer(progress: $pressure)
+        VStack(spacing: 24) {
+            Text("WeAte (V8)")
+                .font(.largeTitle.weight(.heavy))
+                .foregroundStyle(.white)
         
-        Text("Accelerometer: \(String(describing: pressure)) km/h")
+            HStack(spacing: 40) {
+                Dial(value: engine.rpm / 1000, max: 8, labelStep: 1,
+                     redline: engine.limiterCut / 1000,
+                     title: "RPM ×1000", readout: "\(Int(engine.rpm))")
+            
+                VStack(spacing: 4) {
+                    Text("\(engine.gear + 1)")
+                        .font(.system(size: 96, weight: .heavy, design: .rounded))
+                        .foregroundStyle(engine.fuelCut ? .red : .white)
+                    Text("GEAR")
+                        .font(.system(size: 13, weight: .semibold))
+                        .tracking(2)
+                        .foregroundStyle(.white.opacity(0.5))
+                    Text("fan \(Int(fanRPM)) rpm")
+                        .font(.system(size: 13).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.5))
+                        .padding(.top, 32)
+                }
+                .frame(width: 120)
+            
+                Dial(value: engine.speed, max: 240, labelStep: 40,
+                     title: "KM/H", readout: "\(Int(engine.speed))")
+            
+                PressureBar(fraction: pressure / full)
+            }
+        }
+        .padding(48)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black)
+        .ignoresSafeArea()
             .onAppear() {
                 Task { [self, manager] in
                     for await touchData in manager.touchDataStream {
@@ -145,8 +179,6 @@ struct ContentView: View {
             .onDisappear {
                 manager.stopListening()
             }
-        
-        Text("rpm = \(String(describing: Int(fanRPM)))")
             .task {
                 let inControl = await smc?.takeControl() == true
                 var lastTarget: Float = 0
@@ -168,32 +200,44 @@ struct ContentView: View {
             .task {
                 let clock = ContinuousClock()
                 var last = clock.now
+                v8.start()
                 
                 while !Task.isCancelled {
                     let now = clock.now
                     let dt = Float((now - last) / .seconds(1))
                     last = now
                     engine.update(throttle: throttle(from: pressure), dt: dt)
+                    v8.update(rpm: engine.rpm, load: engine.load)
                     try? await Task.sleep(for: .milliseconds(16))
                 }
             }
     }
 }
 
-struct Accelerometer: View {
-    @Binding var progress: Float
+/// Vertical pressure bar: fills from the bottom, green -> yellow -> orange -> red.
+struct PressureBar: View {
+    let fraction: Float
     
     var body: some View {
-        ZStack {
-            Circle()
-                .trim(from: 0, to: CGFloat(progress))
-                .fill(.black)
-                .mask {
-                    Circle()
-                        .strokeBorder(.white, lineWidth: 20)
-                        .fill(.clear)
+        VStack(spacing: 10) {
+            GeometryReader { geo in
+                let filled = geo.size.height * CGFloat(min(max(fraction, 0), 1))
+                ZStack(alignment: .bottom) {
+                    Capsule()
+                        .fill(.white.opacity(0.08))
+                    LinearGradient(colors: [.green, .yellow, .orange, .red],
+                                   startPoint: .bottom, endPoint: .top)
+                        .mask(alignment: .bottom) {
+                            Capsule().frame(height: filled)
+                        }
                 }
-                .rotationEffect(.degrees(90))
+            }
+            .frame(width: 18, height: 320)
+            
+            Text("PRESSURE")
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(2)
+                .foregroundStyle(.white.opacity(0.5))
         }
     }
 }
