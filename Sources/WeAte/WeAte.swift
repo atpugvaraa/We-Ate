@@ -8,6 +8,22 @@
 import SwiftUI
 import OpenMultitouchSupport
 
+let deadzone: Float = 40
+let full: Float = 330
+let minFanSpeed: Float = 2317
+let maxFanSpeed: Float = 6550
+
+func throttle(from pressure: Float) -> Float {
+    let pushed = pressure - deadzone
+    let fraction = pushed / (full - deadzone)
+    return min(max(fraction, 0), 1)
+}
+
+func fanTarget(for throttle: Float) -> Float {
+    let target = minFanSpeed + throttle * (maxFanSpeed - minFanSpeed)      // min 2317, max 6550 from recon
+    return target
+}
+
 @main
 struct WeAte: App {
     // Signal sources stop firing if deallocated, so keep them for the app's lifetime.
@@ -120,9 +136,21 @@ struct ContentView: View {
         
         Text("rpm = \(String(describing: Int(fanRPM)))")
             .task {
+                let inControl = await smc?.takeControl() == true
+                var lastTarget: Float = 0
                 while !Task.isCancelled {
+                    if inControl {
+                        let target: Float = fanTarget(for: throttle(from: pressure))
+                        
+                        if abs(target - lastTarget) > 50 {
+                            if smc?.writeFloat("F0Tg", target) == true {
+                                lastTarget = target
+                            }
+                            lastTarget = target
+                        }
+                    }
                     fanRPM = smc?.readFloat("F0Ac") ?? 0
-                    try? await Task.sleep(for: .milliseconds(500))
+                    try? await Task.sleep(for: .milliseconds(200))
                 }
             }
     }
