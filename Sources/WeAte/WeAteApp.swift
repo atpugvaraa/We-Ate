@@ -8,15 +8,17 @@
 import SwiftUI
 import OpenMultitouchSupport
 
-let deadzone: Float = 40
-let full: Float = 330
+// Throttle feel knobs — tune these by ear.
+let deadzone: Float = 40     // below this = idle (finger resting)
+let full: Float = 140        // pressure for full throttle (sensor max ~331, so no need to mash)
+let curve: Float = 0.5       // < 1 = light/medium presses rev harder; 1 = linear
 let minFanSpeed: Float = 2317
 let maxFanSpeed: Float = 6550
 
 func throttle(from pressure: Float) -> Float {
     let pushed = pressure - deadzone
-    let fraction = pushed / (full - deadzone)
-    return min(max(fraction, 0), 1)
+    let fraction = min(max(pushed / (full - deadzone), 0), 1)
+    return pow(fraction, curve)
 }
 
 func fanTarget(for throttle: Float) -> Float {
@@ -65,7 +67,9 @@ struct WeAte: App {
 struct ContentView: View {
     let manager: OMSManager = .shared
     let smc = SMC.shared
+    
     @State private var fanRPM: Float = 0
+    @State private var engine = Engine()
     
     init() {
         manager.startListening()
@@ -110,6 +114,14 @@ struct ContentView: View {
         /// try to write the bytes
         print(smc?.restoreAuto() as Any)
         
+        
+        /// running the test
+//        var e = Engine()
+//        for _ in 0..<30 {
+//            e.update(throttle: 1, dt: 1.0 / 60)
+//        }
+//        
+//        print("after 30 ticks: ", e.rpm)
     }
     
     @State private var pressure: Float = 0
@@ -140,17 +152,29 @@ struct ContentView: View {
                 var lastTarget: Float = 0
                 while !Task.isCancelled {
                     if inControl {
-                        let target: Float = fanTarget(for: throttle(from: pressure))
+                        let engineFraction = (engine.rpm - engine.idle) / (engine.redline - engine.idle)
+                        let target: Float = fanTarget(for: engineFraction)
                         
                         if abs(target - lastTarget) > 50 {
                             if smc?.writeFloat("F0Tg", target) == true {
                                 lastTarget = target
                             }
-                            lastTarget = target
                         }
                     }
                     fanRPM = smc?.readFloat("F0Ac") ?? 0
                     try? await Task.sleep(for: .milliseconds(200))
+                }
+            }
+            .task {
+                let clock = ContinuousClock()
+                var last = clock.now
+                
+                while !Task.isCancelled {
+                    let now = clock.now
+                    let dt = Float((now - last) / .seconds(1))
+                    last = now
+                    engine.update(throttle: throttle(from: pressure), dt: dt)
+                    try? await Task.sleep(for: .milliseconds(16))
                 }
             }
     }
