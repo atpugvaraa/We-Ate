@@ -20,9 +20,18 @@ struct WeAte: App {
 
 struct ContentView: View {
     let manager: OMSManager = .shared
+    let smc = SMC()
+    @State private var fanRPM: Float = 0
     
     init() {
         manager.startListening()
+//        var smc = SMC()
+//        var FNum = smc?.readBytes("FNum")
+//        print("FNum =", FNum as Any)
+//        var F0Ac = smc?.readBytes("F0Ac")
+//        print("F0Ac (bytes) =", F0Ac as Any)
+//        print("F0Ac (keyInfo) =", smc?.keyInfo("F0Ac") as Any)
+//        print(smc?.readFloat("F0Ac") as Any)
     }
     
     @State private var pressure: Float = 0
@@ -45,6 +54,14 @@ struct ContentView: View {
             }
             .onDisappear {
                 manager.stopListening()
+            }
+        
+        Text("rpm = \(String(describing: Int(fanRPM)))")
+            .task {
+                while !Task.isCancelled {
+                    fanRPM = smc?.readFloat("F0Ac") ?? 0
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
             }
     }
 }
