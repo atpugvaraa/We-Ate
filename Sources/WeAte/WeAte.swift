@@ -10,21 +10,50 @@ import OpenMultitouchSupport
 
 @main
 struct WeAte: App {
+    // Signal sources stop firing if deallocated, so keep them for the app's lifetime.
+    private static var signalSources: [DispatchSourceSignal] = []
+
+    init() {
+        Self.restoreFanOnExit()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .frame(width: 1080, height: 720)
         }
     }
+
+    /// Puts the fan back in firmware control on ⌘Q, Ctrl-C (SIGINT) and `kill` (SIGTERM).
+    /// ponytail: crash / kill -9 can't be caught; restoreAuto at launch covers the next run.
+    private static func restoreFanOnExit() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { _ = SMC.shared?.restoreAuto() }
+        }
+
+        for sig in [SIGINT, SIGTERM] {
+            signal(sig, SIG_IGN) // stop the default instant kill so we get a chance to clean up
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler {
+                MainActor.assumeIsolated { _ = SMC.shared?.restoreAuto() }
+                exit(0)
+            }
+            source.resume()
+            signalSources.append(source)
+        }
+    }
 }
 
 struct ContentView: View {
     let manager: OMSManager = .shared
-    let smc = SMC()
+    let smc = SMC.shared
     @State private var fanRPM: Float = 0
     
     init() {
         manager.startListening()
+        /// Read the fan speed
 //        var smc = SMC()
 //        var FNum = smc?.readBytes("FNum")
 //        print("FNum =", FNum as Any)
@@ -32,6 +61,39 @@ struct ContentView: View {
 //        print("F0Ac (bytes) =", F0Ac as Any)
 //        print("F0Ac (keyInfo) =", smc?.keyInfo("F0Ac") as Any)
 //        print(smc?.readFloat("F0Ac") as Any)
+        
+        /// Read fan speed min
+//        print("F0Mn (keyInfo) =", smc?.keyInfo("F0Mn") as Any)
+//        print("F0Mn (float) =", smc?.readFloat("F0Mn") as Any)
+        
+        /// Read fan speed max
+//        print("F0Mx (keyInfo) =", smc?.keyInfo("F0Mx") as Any)
+//        print("F0Mx (float) =", smc?.readFloat("F0Mx") as Any)
+        
+        /// Target rpm
+//        print("F0Tg (keyInfo) =", smc?.keyInfo("F0Tg") as Any)
+//        print("F0Tg (float) =", smc?.readFloat("F0Tg") as Any)
+        
+        /// Fan mode
+//        print("F0md (keyInfo) =", smc?.keyInfo("F0md") as Any)
+//        print("F0md (float) =", smc?.readBytes("F0md") as Any)
+        
+        /// Fan mode (fallback?)
+//        print("F0Md (keyInfo) =", smc?.keyInfo("F0Md") as Any)
+//        print("F0Md (float) =", smc?.readBytes("F0Md") as Any)
+        
+        /// firmware unlock flag
+//        print("Ftst (keyInfo) =", smc?.keyInfo("Ftst") as Any)
+//        print("Ftst (float) =", smc?.readBytes("Ftst") as Any)
+        
+        /// only runs with sudo
+        /// try to write the bytes
+//        print(smc?.writeBytes("Ftst", [0]) as Any)
+        
+        /// only runs with sudo
+        /// try to write the bytes
+        print(smc?.restoreAuto() as Any)
+        
     }
     
     @State private var pressure: Float = 0
